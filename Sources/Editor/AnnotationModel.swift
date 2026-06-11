@@ -119,6 +119,10 @@ struct CanvasStyle: Equatable {
     var background: CanvasBackground = .none
     var cornerRadius: CGFloat = 0
     var shadow = false
+    /// Grow the screenshot's own background outward by this many pixels
+    /// (between the image and the canvas padding).
+    var backgroundExtension: CGFloat = 0
+    var backgroundExtensionColor: RGBA?
 
     static let plain = CanvasStyle()
 
@@ -133,6 +137,7 @@ struct CanvasStyle: Equatable {
         var c = self
         c.padding = (padding * scale).rounded()
         c.cornerRadius = (cornerRadius * scale).rounded()
+        c.backgroundExtension = (backgroundExtension * scale).rounded()
         return c
     }
 }
@@ -155,6 +160,13 @@ enum CanvasBackground: Equatable {
 /// The editor's document: base image + annotations + canvas styling + undo.
 @MainActor
 final class EditorDocument: ObservableObject {
+    /// The untouched original. Cropping is non-destructive: `baseImage` is
+    /// always `fullImage` restricted to `cropRect`, so the crop can be
+    /// revisited and expanded back out at any time.
+    let fullImage: CGImage
+    /// Current crop in full-image pixel coordinates; nil = no crop.
+    @Published private(set) var cropRect: CGRect?
+
     @Published var baseImage: CGImage {
         didSet { rebakeBase() }
     }
@@ -187,6 +199,10 @@ final class EditorDocument: ObservableObject {
     @Published var background: CanvasBackground = .none
     @Published var cornerRadius: CGFloat = 0
     @Published var shadow = false
+    /// Extend the screenshot's own background outward (pixels).
+    @Published var backgroundExtension: CGFloat = 0
+    /// Auto-detected from the image edges at open; user-overridable.
+    @Published var extensionColor: RGBA?
 
     var lineWidth: CGFloat { strokeWidth }
     var fontSize: CGFloat { fontSizeValue }
@@ -195,35 +211,76 @@ final class EditorDocument: ObservableObject {
         (annotations.filter { $0.kind == .counter }.map(\.number).max() ?? 0) + 1
     }
 
-    /// Full composition size including padding.
+    /// Full composition size including padding and background extension.
+    /// In crop mode the canvas shows the full original image, bare.
     var compositionSize: CGSize {
-        CGSize(width: CGFloat(baseImage.width) + padding * 2,
-               height: CGFloat(baseImage.height) + padding * 2)
+        if tool == .crop {
+            return CGSize(width: fullImage.width, height: fullImage.height)
+        }
+        let inset = (padding + backgroundExtension) * 2
+        return CGSize(width: CGFloat(baseImage.width) + inset,
+                      height: CGFloat(baseImage.height) + inset)
+    }
+
+    var fullRect: CGRect {
+        CGRect(x: 0, y: 0, width: fullImage.width, height: fullImage.height)
     }
 
     init(image: CGImage, canvas: CanvasStyle = .plain) {
+        fullImage = image
         baseImage = image
         bakedImage = image
         padding = canvas.padding
         background = canvas.background
         cornerRadius = canvas.cornerRadius
         shadow = canvas.shadow
+        backgroundExtension = canvas.backgroundExtension
+        extensionColor = canvas.backgroundExtensionColor ?? image.dominantEdgeColor()
     }
 
     var canvasStyle: CanvasStyle {
         CanvasStyle(padding: padding, background: background,
-                    cornerRadius: cornerRadius, shadow: shadow)
+                    cornerRadius: cornerRadius, shadow: shadow,
+                    backgroundExtension: backgroundExtension,
+                    backgroundExtensionColor: extensionColor)
+    }
+
+    /// Trim uneven background margins down to the content's bounding box,
+    /// then let `backgroundExtension` re-add perfectly even margins.
+    func normalizeMargins() {
+        let detected = extensionColor ?? baseImage.dominantEdgeColor()
+        guard let bg = detected else {
+            Toast.show("Couldn't detect a background color", systemImage: "exclamationmark.circle.fill")
+            return
+        }
+        if extensionColor == nil { extensionColor = bg }
+
+        guard let box = baseImage.contentBoundingBox(background: bg),
+              box.width > 16, box.height > 16 else {
+            Toast.show("Couldn't detect content bounds", systemImage: "exclamationmark.circle.fill")
+            return
+        }
+        let full = CGRect(x: 0, y: 0, width: baseImage.width, height: baseImage.height)
+        if box.width < full.width - 4 || box.height < full.height - 4 {
+            applyCrop(box)
+        }
+        // Make the effect visible immediately.
+        if backgroundExtension == 0 {
+            backgroundExtension = 48
+        }
     }
 
     // MARK: - Undo
 
     private struct Snapshot {
         let annotations: [Annotation]
-        let baseImage: CGImage
+        let cropRect: CGRect?
         let padding: CGFloat
         let background: CanvasBackground
         let cornerRadius: CGFloat
         let shadow: Bool
+        let backgroundExtension: CGFloat
+        let extensionColor: RGBA?
     }
 
     private var undoStack: [Snapshot] = []
@@ -233,8 +290,9 @@ final class EditorDocument: ObservableObject {
     var canRedo: Bool { !redoStack.isEmpty }
 
     private var currentSnapshot: Snapshot {
-        Snapshot(annotations: annotations, baseImage: baseImage, padding: padding,
-                 background: background, cornerRadius: cornerRadius, shadow: shadow)
+        Snapshot(annotations: annotations, cropRect: cropRect, padding: padding,
+                 background: background, cornerRadius: cornerRadius, shadow: shadow,
+                 backgroundExtension: backgroundExtension, extensionColor: extensionColor)
     }
 
     /// Call before any mutation.
@@ -258,11 +316,16 @@ final class EditorDocument: ObservableObject {
 
     private func apply(_ snap: Snapshot) {
         annotations = snap.annotations
-        if baseImage !== snap.baseImage { baseImage = snap.baseImage }
+        if cropRect != snap.cropRect {
+            cropRect = snap.cropRect
+            rebuildBaseImage()
+        }
         padding = snap.padding
         background = snap.background
         cornerRadius = snap.cornerRadius
         shadow = snap.shadow
+        backgroundExtension = snap.backgroundExtension
+        extensionColor = snap.extensionColor
         selectedID = nil
         editingTextID = nil
     }
@@ -291,18 +354,53 @@ final class EditorDocument: ObservableObject {
         selectedID = nil
     }
 
+    /// Crop given a rect in CURRENT (cropped) image coordinates
+    /// (used by normalize-margins, which analyses the visible image).
     func applyCrop(_ rect: CGRect) {
-        let pixelRect = rect.intersection(CGRect(x: 0, y: 0,
-                                                 width: baseImage.width,
-                                                 height: baseImage.height)).integral
-        guard pixelRect.width > 4, pixelRect.height > 4,
-              let cropped = baseImage.cropping(to: pixelRect) else { return }
-        registerUndo()
-        baseImage = cropped
-        for i in annotations.indices {
-            annotations[i].translate(dx: -pixelRect.minX, dy: -pixelRect.minY)
+        let origin = cropRect?.origin ?? .zero
+        setCrop(rect.offsetBy(dx: origin.x, dy: origin.y))
+    }
+
+    /// Set the crop region in FULL-image pixel coordinates (nil removes the
+    /// crop). Non-destructive and undoable; annotations keep their position
+    /// relative to the image content.
+    func setCrop(_ newFullRect: CGRect?) {
+        var resolved: CGRect? = newFullRect?.standardized.integral.intersection(fullRect)
+        if let r = resolved {
+            guard r.width > 4, r.height > 4 else { return }
+            // Snapped back to (essentially) the full image -> no crop.
+            if r.width >= fullRect.width - 1, r.height >= fullRect.height - 1 {
+                resolved = nil
+            }
         }
+        guard resolved != cropRect else {
+            tool = .select
+            return
+        }
+
+        registerUndo()
+        let oldOrigin = cropRect?.origin ?? .zero
+        cropRect = resolved
+        let newOrigin = cropRect?.origin ?? .zero
+        if oldOrigin != newOrigin {
+            // Annotations live in cropped-image coordinates; shift them so
+            // they stay glued to the same content.
+            let dx = oldOrigin.x - newOrigin.x
+            let dy = oldOrigin.y - newOrigin.y
+            for i in annotations.indices {
+                annotations[i].translate(dx: dx, dy: dy)
+            }
+        }
+        rebuildBaseImage()
         tool = .select
+    }
+
+    private func rebuildBaseImage() {
+        if let cropRect, let cropped = fullImage.cropping(to: cropRect) {
+            baseImage = cropped
+        } else {
+            baseImage = fullImage
+        }
     }
 
     private func rebakeBase() {

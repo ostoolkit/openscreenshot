@@ -383,7 +383,46 @@ struct CanvasSidebar: View {
 
                 Divider()
 
-                Text("Background")
+                Text("Screenshot background")
+                    .font(.headline)
+
+                slider(label: "Extend background",
+                       value: $document.backgroundExtension,
+                       range: 0...240,
+                       format: { "\(Int($0)) px" })
+
+                HStack(spacing: 8) {
+                    Button {
+                        document.registerUndo()
+                        ColorPanelBridge.shared.present(
+                            initial: (document.extensionColor ?? .black).nsColor) { nsColor in
+                            document.extensionColor = RGBA(color: Color(nsColor: nsColor))
+                        }
+                    } label: {
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill((document.extensionColor ?? .black).color)
+                            .frame(width: 34, height: 22)
+                            .overlay(RoundedRectangle(cornerRadius: 5)
+                                .strokeBorder(.white.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Background color (auto-detected from the image edges)")
+
+                    Button("Normalize margins") {
+                        document.normalizeMargins()
+                    }
+                    .controlSize(.small)
+                    .help("Trim uneven background around the content, then extend it evenly")
+                }
+
+                Text("Grows the screenshot's own background — e.g. extend a terminal's dark backdrop before adding canvas padding.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider()
+
+                Text("Canvas background")
                     .font(.headline)
 
                 noneButton

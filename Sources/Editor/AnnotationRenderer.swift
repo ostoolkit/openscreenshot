@@ -202,8 +202,11 @@ enum AnnotationRenderer {
                         canvas: CanvasStyle,
                         annotations: [Annotation] = []) -> CGImage? {
         let padding = max(0, canvas.padding)
-        let size = CGSize(width: CGFloat(image.width) + padding * 2,
-                          height: CGFloat(image.height) + padding * 2)
+        let extPad = max(0, canvas.backgroundExtension)
+        let layerSize = CGSize(width: CGFloat(image.width) + extPad * 2,
+                               height: CGFloat(image.height) + extPad * 2)
+        let size = CGSize(width: layerSize.width + padding * 2,
+                          height: layerSize.height + padding * 2)
         let width = Int(size.width)
         let height = Int(size.height)
         guard width > 0, height > 0,
@@ -231,17 +234,22 @@ enum AnnotationRenderer {
                                    options: [])
         }
 
-        // 2. Screenshot layer. Round the corners in a separate pass, then draw
+        // 2. Screenshot layer. Optionally grow the screenshot's own background
+        // outward first, then round the corners in a separate pass, then draw
         // with a context shadow: the shadow follows the drawn image's alpha
         // contour, so it works for opaque area captures and transparent-edged
         // window captures alike (no opaque backing needed — which would peek
         // out from behind transparent corners).
         var layer = image
-        if canvas.cornerRadius > 0, let rounded = roundedCorners(image, radius: canvas.cornerRadius) {
+        if extPad > 0, let color = canvas.backgroundExtensionColor,
+           let extended = extendedWithBackground(image, pad: extPad, color: color) {
+            layer = extended
+        }
+        if canvas.cornerRadius > 0, let rounded = roundedCorners(layer, radius: canvas.cornerRadius) {
             layer = rounded
         }
         let imageRect = CGRect(x: padding, y: padding,
-                               width: CGFloat(image.width), height: CGFloat(image.height))
+                               width: layerSize.width, height: layerSize.height)
         ctx.saveGState()
         if canvas.shadow, padding > 0 {
             ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 40,
@@ -250,17 +258,38 @@ enum AnnotationRenderer {
         ctx.draw(layer, in: imageRect)
         ctx.restoreGState()
 
-        // 3. Annotations: flip to top-left coords offset by padding.
+        // 3. Annotations: flip to top-left coords, offset by padding + extension
+        // (annotation coordinates live in base-image space). Clip to the image:
+        // with non-destructive cropping, annotations can lie outside the
+        // visible region.
         guard !annotations.isEmpty else { return ctx.makeImage() }
         ctx.saveGState()
-        ctx.translateBy(x: padding, y: size.height - padding)
+        ctx.translateBy(x: padding + extPad, y: size.height - padding - extPad)
         ctx.scaleBy(x: 1, y: -1)
         let canvasSize = CGSize(width: image.width, height: image.height)
+        ctx.clip(to: CGRect(origin: .zero, size: canvasSize))
         for a in annotations where a.kind != .blur && a.kind != .pixelate {
             draw(a, in: ctx, canvasSize: canvasSize)
         }
         ctx.restoreGState()
 
+        return ctx.makeImage()
+    }
+
+    /// Pad an image on all sides with a solid background color.
+    private static func extendedWithBackground(_ image: CGImage, pad: CGFloat,
+                                               color: RGBA) -> CGImage? {
+        let w = image.width + Int(pad) * 2
+        let h = image.height + Int(pad) * 2
+        guard let ctx = CGContext(data: nil, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.setFillColor(color.cgColor)
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.draw(image, in: CGRect(x: Int(pad), y: Int(pad),
+                                   width: image.width, height: image.height))
         return ctx.makeImage()
     }
 

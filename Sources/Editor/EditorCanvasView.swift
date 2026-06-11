@@ -30,7 +30,6 @@ struct EditorCanvasView: View {
     private enum DragMode {
         case draw
         case move(UUID)
-        case crop
         case idle
     }
 
@@ -39,7 +38,6 @@ struct EditorCanvasView: View {
     @State private var moveLast: CGPoint?
     @State private var moveDistance: CGFloat = 0
     @State private var didRegisterMoveUndo = false
-    @State private var cropRect: CGRect?
     // Resize-handle drag bookkeeping.
     @State private var handleAnchor: CGPoint?
     @State private var handleOriginal: CGPoint?
@@ -50,11 +48,28 @@ struct EditorCanvasView: View {
         CGSize(width: document.bakedImage.width, height: document.bakedImage.height)
     }
 
+    /// Distance from composition edge to the base image: canvas padding plus
+    /// the extended-background margin.
+    private var contentInset: CGFloat {
+        document.padding + document.backgroundExtension
+    }
+
     var body: some View {
+        if document.tool == .crop {
+            // Dedicated crop mode: the full original image with an adjustable,
+            // re-editable crop window (non-destructive).
+            CropModeView(document: document, scale: scale)
+        } else {
+            editingBody
+        }
+    }
+
+    private var editingBody: some View {
         let comp = document.compositionSize
         let pad = document.padding * scale
+        let inset = contentInset * scale
 
-        ZStack(alignment: .topLeading) {
+        return ZStack(alignment: .topLeading) {
             backgroundLayer
                 .frame(width: comp.width * scale, height: comp.height * scale)
 
@@ -63,16 +78,13 @@ struct EditorCanvasView: View {
 
             annotationLayer
                 .frame(width: imageSize.width * scale, height: imageSize.height * scale)
-                .offset(x: pad, y: pad)
+                .offset(x: inset, y: inset)
 
             selectionChrome
-                .offset(x: pad, y: pad)
+                .offset(x: inset, y: inset)
 
             textEditorOverlay
-                .offset(x: pad, y: pad)
-
-            cropOverlay
-                .offset(x: pad, y: pad)
+                .offset(x: inset, y: inset)
         }
         .contentShape(Rectangle())
         .gesture(canvasGesture)
@@ -95,15 +107,25 @@ struct EditorCanvasView: View {
     }
 
     private var imageLayer: some View {
-        Image(decorative: document.bakedImage, scale: 1 / scale)
-            .resizable()
-            .interpolation(.high)
-            .frame(width: imageSize.width * scale, height: imageSize.height * scale)
-            .clipShape(RoundedRectangle(cornerRadius: min(document.cornerRadius,
-                                                          imageSize.width / 2,
-                                                          imageSize.height / 2) * scale))
-            .shadow(color: document.shadow && document.padding > 0 ? .black.opacity(0.5) : .clear,
-                    radius: 40 * scale, y: 12 * scale)
+        let ext = document.backgroundExtension
+        let extWidth = (imageSize.width + ext * 2) * scale
+        let extHeight = (imageSize.height + ext * 2) * scale
+        return ZStack(alignment: .topLeading) {
+            if ext > 0, let color = document.extensionColor {
+                color.color
+            }
+            Image(decorative: document.bakedImage, scale: 1 / scale)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: imageSize.width * scale, height: imageSize.height * scale)
+                .offset(x: ext * scale, y: ext * scale)
+        }
+        .frame(width: extWidth, height: extHeight, alignment: .topLeading)
+        .clipShape(RoundedRectangle(cornerRadius: min(document.cornerRadius * scale,
+                                                      extWidth / 2,
+                                                      extHeight / 2)))
+        .shadow(color: document.shadow && document.padding > 0 ? .black.opacity(0.5) : .clear,
+                radius: 40 * scale, y: 12 * scale)
     }
 
     private var annotationLayer: some View {
@@ -283,74 +305,30 @@ struct EditorCanvasView: View {
         document.editingTextID = nil
     }
 
-    // MARK: - Crop overlay
-
-    @ViewBuilder
-    private var cropOverlay: some View {
-        if document.tool == .crop, let r = cropRect {
-            ZStack(alignment: .topLeading) {
-                Path { p in
-                    p.addRect(CGRect(x: 0, y: 0,
-                                     width: imageSize.width * scale,
-                                     height: imageSize.height * scale))
-                    p.addRect(CGRect(x: r.minX * scale, y: r.minY * scale,
-                                     width: r.width * scale, height: r.height * scale))
-                }
-                .fill(Color.black.opacity(0.5), style: FillStyle(eoFill: true))
-                .allowsHitTesting(false)
-
-                Rectangle()
-                    .stroke(Color.white, lineWidth: 1.5)
-                    .frame(width: max(r.width * scale, 1), height: max(r.height * scale, 1))
-                    .offset(x: r.minX * scale, y: r.minY * scale)
-                    .allowsHitTesting(false)
-
-                HStack(spacing: 6) {
-                    Button("Cancel") {
-                        cropRect = nil
-                        document.tool = .select
-                    }
-                    Button("Apply Crop") {
-                        document.applyCrop(r)
-                        cropRect = nil
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .controlSize(.small)
-                .padding(6)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                .offset(x: max(r.minX * scale, 4),
-                        y: min(r.maxY * scale + 8, imageSize.height * scale - 40))
-            }
-        }
-    }
-
     // MARK: - Main gesture
 
     private var canvasGesture: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { value in
-                let pad = document.padding
-                let point = CGPoint(x: value.location.x / scale - pad,
-                                    y: value.location.y / scale - pad)
-                let startPoint = CGPoint(x: value.startLocation.x / scale - pad,
-                                         y: value.startLocation.y / scale - pad)
+                let inset = contentInset
+                let point = CGPoint(x: value.location.x / scale - inset,
+                                    y: value.location.y / scale - inset)
+                let startPoint = CGPoint(x: value.startLocation.x / scale - inset,
+                                         y: value.startLocation.y / scale - inset)
                 handleDragChanged(point: point, startPoint: startPoint)
             }
             .onEnded { value in
-                let pad = document.padding
-                let point = CGPoint(x: value.location.x / scale - pad,
-                                    y: value.location.y / scale - pad)
-                let startPoint = CGPoint(x: value.startLocation.x / scale - pad,
-                                         y: value.startLocation.y / scale - pad)
+                let inset = contentInset
+                let point = CGPoint(x: value.location.x / scale - inset,
+                                    y: value.location.y / scale - inset)
+                let startPoint = CGPoint(x: value.startLocation.x / scale - inset,
+                                         y: value.startLocation.y / scale - inset)
                 handleDragEnded(point: point, startPoint: startPoint)
             }
     }
 
-    /// Decide once per drag what it does: move an annotation, draw, or crop.
+    /// Decide once per drag what it does: move an annotation or draw.
     private func decideDragMode(startPoint: CGPoint) -> DragMode {
-        if document.tool == .crop { return .crop }
-
         // Dragging from inside the selected annotation moves it, whatever the tool.
         if document.editingTextID == nil,
            let sel = document.annotation(id: document.selectedID),
@@ -407,11 +385,6 @@ struct EditorCanvasView: View {
             }
             moveLast = point
 
-        case .crop:
-            cropRect = CGRect(x: min(startPoint.x, point.x), y: min(startPoint.y, point.y),
-                              width: abs(point.x - startPoint.x), height: abs(point.y - startPoint.y))
-                .intersection(CGRect(origin: .zero, size: imageSize))
-
         case .draw:
             switch document.tool {
             case .text, .counter:
@@ -462,7 +435,7 @@ struct EditorCanvasView: View {
                 }
             }
 
-        case .crop, .idle, nil:
+        case .idle, nil:
             break
 
         case .draw:
@@ -506,6 +479,222 @@ struct EditorCanvasView: View {
         case .spotlight: .spotlight
         default: .rect
         }
+    }
+}
+
+/// Interactive, re-editable crop mode: shows the FULL original image with the
+/// current crop as an adjustable window (handles, move, redraw, thirds grid).
+/// Cropping is non-destructive, so re-entering the tool lets you expand the
+/// region back out.
+struct CropModeView: View {
+    @ObservedObject var document: EditorDocument
+    let scale: CGFloat
+
+    @State private var rect: CGRect = .zero
+    @State private var dragAnchor: CGRect?
+    @State private var dragKind: DragKind = .none
+
+    private enum DragKind {
+        case none
+        case move
+        case draw(start: CGPoint)
+    }
+
+    private var fullSize: CGSize {
+        CGSize(width: document.fullImage.width, height: document.fullImage.height)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Image(decorative: document.fullImage, scale: 1 / scale)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: fullSize.width * scale, height: fullSize.height * scale)
+
+            // Dim everything outside the crop window.
+            Path { p in
+                p.addRect(CGRect(origin: .zero,
+                                 size: CGSize(width: fullSize.width * scale,
+                                              height: fullSize.height * scale)))
+                p.addRect(scaled(rect))
+            }
+            .fill(Color.black.opacity(0.55), style: FillStyle(eoFill: true))
+            .allowsHitTesting(false)
+
+            // Border + rule-of-thirds grid.
+            Path { p in
+                let r = scaled(rect)
+                p.addRect(r)
+                for i in 1...2 {
+                    let x = r.minX + r.width * CGFloat(i) / 3
+                    p.move(to: CGPoint(x: x, y: r.minY))
+                    p.addLine(to: CGPoint(x: x, y: r.maxY))
+                    let y = r.minY + r.height * CGFloat(i) / 3
+                    p.move(to: CGPoint(x: r.minX, y: y))
+                    p.addLine(to: CGPoint(x: r.maxX, y: y))
+                }
+            }
+            .stroke(Color.white.opacity(0.9), lineWidth: 1)
+            .allowsHitTesting(false)
+
+            handles
+
+            dimensionsLabel
+
+            controlBar
+        }
+        .frame(width: fullSize.width * scale, height: fullSize.height * scale)
+        .contentShape(Rectangle())
+        .gesture(cropGesture)
+        .onAppear {
+            rect = document.cropRect ?? document.fullRect
+        }
+    }
+
+    private func scaled(_ r: CGRect) -> CGRect {
+        CGRect(x: r.minX * scale, y: r.minY * scale,
+               width: r.width * scale, height: r.height * scale)
+    }
+
+    private var dimensionsLabel: some View {
+        let r = scaled(rect)
+        return Text("\(Int(rect.width)) × \(Int(rect.height))")
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 5))
+            .offset(x: max(r.minX + 6, 4), y: max(r.minY + 6, 4))
+            .allowsHitTesting(false)
+    }
+
+    private var controlBar: some View {
+        let r = scaled(rect)
+        let below = r.maxY + 50 < fullSize.height * scale
+        return HStack(spacing: 8) {
+            Button("Cancel") {
+                document.tool = .select
+            }
+            if document.cropRect != nil {
+                Button("Remove Crop") {
+                    document.setCrop(nil)
+                }
+            }
+            Button("Apply") {
+                document.setCrop(rect)
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
+        }
+        .controlSize(.small)
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+        .position(x: min(max(r.midX, 130), fullSize.width * scale - 130),
+                  y: below ? r.maxY + 30 : max(r.minY - 30, 24))
+    }
+
+    // MARK: - Handles
+
+    private var handles: some View {
+        ForEach(Array(SelectionHandle.allCases.enumerated()), id: \.offset) { _, handle in
+            let pos = position(of: handle, in: scaled(rect))
+            Circle()
+                .fill(.white)
+                .overlay(Circle().stroke(Color.accentColor, lineWidth: 1.5))
+                .frame(width: 12, height: 12)
+                .contentShape(Circle().inset(by: -8))
+                .position(pos)
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            if dragAnchor == nil { dragAnchor = rect }
+                            guard let anchor = dragAnchor else { return }
+                            let dx = value.translation.width / scale
+                            let dy = value.translation.height / scale
+                            rect = clamped(resize(anchor, handle: handle, dx: dx, dy: dy))
+                        }
+                        .onEnded { _ in dragAnchor = nil }
+                )
+        }
+    }
+
+    /// Handle positions in view space. SelectionHandle's "top" refers to the
+    /// AppKit-global top; in view coordinates (y down) that's minY.
+    private func position(of handle: SelectionHandle, in r: CGRect) -> CGPoint {
+        switch handle {
+        case .topLeft: CGPoint(x: r.minX, y: r.minY)
+        case .top: CGPoint(x: r.midX, y: r.minY)
+        case .topRight: CGPoint(x: r.maxX, y: r.minY)
+        case .left: CGPoint(x: r.minX, y: r.midY)
+        case .right: CGPoint(x: r.maxX, y: r.midY)
+        case .bottomLeft: CGPoint(x: r.minX, y: r.maxY)
+        case .bottom: CGPoint(x: r.midX, y: r.maxY)
+        case .bottomRight: CGPoint(x: r.maxX, y: r.maxY)
+        }
+    }
+
+    /// Resize in image coordinates (y down): "top" handles move minY.
+    private func resize(_ r: CGRect, handle: SelectionHandle, dx: CGFloat, dy: CGFloat) -> CGRect {
+        var minX = r.minX, minY = r.minY, maxX = r.maxX, maxY = r.maxY
+        switch handle {
+        case .topLeft: minX += dx; minY += dy
+        case .top: minY += dy
+        case .topRight: maxX += dx; minY += dy
+        case .left: minX += dx
+        case .right: maxX += dx
+        case .bottomLeft: minX += dx; maxY += dy
+        case .bottom: maxY += dy
+        case .bottomRight: maxX += dx; maxY += dy
+        }
+        return CGRect(x: min(minX, maxX), y: min(minY, maxY),
+                      width: abs(maxX - minX), height: abs(maxY - minY))
+    }
+
+    private func clamped(_ r: CGRect) -> CGRect {
+        var c = r.intersection(document.fullRect)
+        if c.isNull || c.isEmpty {
+            c = rect
+        }
+        if c.width < 20 { c.size.width = 20 }
+        if c.height < 20 { c.size.height = 20 }
+        return c.intersection(document.fullRect)
+    }
+
+    // MARK: - Move / redraw gesture
+
+    private var cropGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { value in
+                let point = CGPoint(x: value.location.x / scale, y: value.location.y / scale)
+                let start = CGPoint(x: value.startLocation.x / scale, y: value.startLocation.y / scale)
+
+                if case .none = dragKind {
+                    if rect.insetBy(dx: -6, dy: -6).contains(start) {
+                        dragKind = .move
+                        dragAnchor = rect
+                    } else {
+                        dragKind = .draw(start: start)
+                    }
+                }
+
+                switch dragKind {
+                case .move:
+                    guard let anchor = dragAnchor else { return }
+                    var moved = anchor.offsetBy(dx: point.x - start.x, dy: point.y - start.y)
+                    moved.origin.x = min(max(moved.origin.x, 0), document.fullRect.width - moved.width)
+                    moved.origin.y = min(max(moved.origin.y, 0), document.fullRect.height - moved.height)
+                    rect = moved
+                case .draw(let s):
+                    rect = clamped(CGRect(x: min(s.x, point.x), y: min(s.y, point.y),
+                                          width: abs(point.x - s.x), height: abs(point.y - s.y)))
+                case .none:
+                    break
+                }
+            }
+            .onEnded { _ in
+                dragKind = .none
+                dragAnchor = nil
+            }
     }
 }
 
