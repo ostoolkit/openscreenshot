@@ -22,6 +22,9 @@ final class AppServices {
         statusItem = StatusItemController()
         HotkeyManager.registerAll()
         PermissionsManager.checkOnLaunch()
+        // Absorb ScreenCaptureKit's one-time first-use stall in the background
+        // so the first real capture doesn't hang under the selection overlay.
+        captureEngine.warmUp()
     }
 
     func willTerminate() {

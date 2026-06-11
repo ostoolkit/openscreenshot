@@ -14,18 +14,65 @@ final class CaptureEngine {
         case displayNotFound
         case windowNotFound
         case noPermission
+        case timedOut
 
         var errorDescription: String? {
             switch self {
             case .displayNotFound: "Could not find the display to capture."
             case .windowNotFound: "Could not find the window to capture."
             case .noPermission: "Screen Recording permission is missing."
+            case .timedOut: "Screen capture timed out — please try again."
+            }
+        }
+    }
+
+    /// The very first ScreenCaptureKit call after a fresh permission grant can
+    /// stall for several seconds (one-time system-side initialization). Run a
+    /// throwaway fetch + 2px screenshot at launch so the stall happens in the
+    /// background instead of underneath the full-screen selection overlay.
+    func warmUp() {
+        guard PermissionsManager.hasScreenRecordingPermission else { return }
+        Task { @MainActor in
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let display = content.displays.first else { return }
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let config = SCStreamConfiguration()
+                config.sourceRect = CGRect(x: 0, y: 0, width: 2, height: 2)
+                config.width = 2
+                config.height = 2
+                config.showsCursor = false
+                _ = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+            } catch {
+                NSLog("Capture warm-up failed: \(error)")
             }
         }
     }
 
     private func shareableContent() async throws -> SCShareableContent {
-        try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        try await withTimeout(8) {
+            try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        }
+    }
+
+    /// Never let a wedged capture call hang the UI flow — fail with a
+    /// user-visible error instead.
+    private func withTimeout<T>(_ seconds: Double,
+                                _ operation: @escaping () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw CaptureError.timedOut
+            }
+            guard let result = try await group.next() else {
+                throw CaptureError.timedOut
+            }
+            group.cancelAll()
+            return result
+        }
     }
 
     private func scDisplay(for screen: NSScreen, in content: SCShareableContent) throws -> SCDisplay {
@@ -46,7 +93,9 @@ final class CaptureEngine {
         let config = baseConfig(showCursor: showCursor)
         config.width = Int(CGFloat(display.width) * scale)
         config.height = Int(CGFloat(display.height) * scale)
-        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        return try await withTimeout(10) {
+            try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        }
     }
 
     /// Frozen snapshots of every display, used as the backdrop of the selection UI.
@@ -80,7 +129,9 @@ final class CaptureEngine {
         config.sourceRect = local
         config.width = Int(local.width * scale)
         config.height = Int(local.height * scale)
-        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        return try await withTimeout(10) {
+            try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        }
     }
 
     // MARK: - Window
@@ -102,7 +153,9 @@ final class CaptureEngine {
         let config = baseConfig(showCursor: false)
         config.width = Int(window.frame.width * scale)
         config.height = Int(window.frame.height * scale)
-        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        return try await withTimeout(10) {
+            try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        }
     }
 
     // MARK: - Config
