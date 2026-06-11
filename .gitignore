@@ -1,8 +1,7 @@
-# Xcode / build
+# Xcode / build (project is generated with XcodeGen)
 build/
 DerivedData/
 *.xcodeproj/
-!*.xcodeproj/project.pbxproj.keep
 xcuserdata/
 *.xcuserstate
 
