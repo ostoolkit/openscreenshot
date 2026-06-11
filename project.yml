@@ -1,9 +1,4 @@
 name: OpenScreenshot
-# Optional, gitignored local overrides (e.g. your DEVELOPMENT_TEAM) —
-# see project-local.yml.example / README "Building".
-include:
-  - path: project-local.yml
-    optional: true
 options:
   bundleIdPrefix: com.ostoolkit
   deploymentTarget:
@@ -23,6 +18,11 @@ targets:
           - "Info.plist"
     dependencies:
       - package: KeyboardShortcuts
+    # Optional personal overrides (DEVELOPMENT_TEAM) come from a gitignored
+    # Configs/Local.xcconfig via Base.xcconfig's optional #include?.
+    configFiles:
+      Debug: Configs/Base.xcconfig
+      Release: Configs/Base.xcconfig
     info:
       path: Sources/Info.plist
       properties:
@@ -38,9 +38,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ostoolkit.openscreenshot
         MACOSX_DEPLOYMENT_TARGET: "14.0"
-        # Local dev: put your DEVELOPMENT_TEAM in a gitignored
-        # project-local.yml so TCC permission grants survive rebuilds
-        # (see project-local.yml.example). Without one, build ad-hoc:
+        # Local dev: put your DEVELOPMENT_TEAM in the gitignored
+        # Configs/Local.xcconfig so TCC permission grants survive rebuilds
+        # (see Configs/Local.xcconfig.example). Without one, build ad-hoc:
         #   xcodebuild ... CODE_SIGN_IDENTITY="-"
         CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: Automatic

@@ -1,0 +1,6 @@
+// Shared build settings live in project.yml. This file exists to pull in
+// optional, gitignored personal overrides — e.g. your DEVELOPMENT_TEAM —
+// so signing identities never end up in the repo.
+// Copy Configs/Local.xcconfig.example to Configs/Local.xcconfig to use it.
+// The "?" makes the include optional: missing file = silently skipped.
+#include? "Local.xcconfig"
