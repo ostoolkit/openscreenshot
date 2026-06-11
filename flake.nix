@@ -19,11 +19,11 @@
         openscreenshot = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
           pname = "openscreenshot";
           # version and hash are updated automatically by the release workflow.
-          version = "0.0.0";
+          version = "1.0.0";
 
           src = pkgs.fetchurl {
             url = "https://github.com/ostoolkit/openscreenshot/releases/download/v${finalAttrs.version}/OpenScreenshot-v${finalAttrs.version}.zip";
-            hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+            hash = "sha256-Av1uV2WW1oeJ/aKIFyGRdxUevmEXupxN1U5AtP9t8nA=";
           };
 
           nativeBuildInputs = [ pkgs.unzip ];
