@@ -42,7 +42,7 @@ A cloud upload service is intentionally out of scope for now.
 ## Building
 
 Requirements: Xcode 15+ (developed against Xcode 26), macOS 14+,
-[XcodeGen](https://github.com/yonas/XcodeGen) (`brew install xcodegen`).
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 ```sh
 xcodegen generate
