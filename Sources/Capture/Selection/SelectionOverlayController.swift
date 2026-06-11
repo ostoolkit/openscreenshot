@@ -45,7 +45,13 @@ final class SelectionOverlayController {
                       startInWindowMode: Bool = false,
                       timerDelay: Int? = nil,
                       completion: @escaping (SelectionOutcome) -> Void) {
-        guard current == nil else { return }
+        // Escape hatch: pressing any capture hotkey while a selection session
+        // is active cancels it (works even if the overlay lost key focus,
+        // since Carbon hotkeys are global).
+        if let existing = current {
+            existing.cancel()
+            return
+        }
         let controller = SelectionOverlayController(completion: completion)
         current = controller
         Task {
