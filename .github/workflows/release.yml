@@ -1,0 +1,79 @@
+name: Release
+
+# Tag a release: git tag v1.0.0 && git push origin v1.0.0
+#
+# Required repository secrets:
+#   DEVELOPER_ID_P12           base64 of the "Developer ID Application" cert + key (.p12)
+#   DEVELOPER_ID_P12_PASSWORD  password for the .p12
+#   APPLE_ID                   Apple ID email used for notarization
+#   APPLE_APP_PASSWORD         app-specific password for that Apple ID
+#   APPLE_TEAM_ID              your 10-char team ID
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.DEVELOPER_ID_P12 }}
+          p12-password: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+
+      - name: Build (Release, universal)
+        run: |
+          xcodebuild -project OpenScreenshot.xcodeproj \
+            -scheme OpenScreenshot \
+            -configuration Release \
+            -derivedDataPath build \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp" \
+            build
+
+      - name: Notarize and staple
+        run: |
+          APP=build/Build/Products/Release/OpenScreenshot.app
+          ditto -c -k --keepParent "$APP" notarize.zip
+          xcrun notarytool submit notarize.zip \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.APPLE_APP_PASSWORD }}" \
+            --wait
+          xcrun stapler staple "$APP"
+
+      - name: Package
+        run: |
+          APP=build/Build/Products/Release/OpenScreenshot.app
+          ditto -c -k --keepParent "$APP" "OpenScreenshot-${GITHUB_REF_NAME}.zip"
+          hdiutil create -volname OpenScreenshot -srcfolder "$APP" -ov -format UDZO \
+            "OpenScreenshot-${GITHUB_REF_NAME}.dmg"
+          shasum -a 256 OpenScreenshot-${GITHUB_REF_NAME}.zip OpenScreenshot-${GITHUB_REF_NAME}.dmg \
+            | tee checksums.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "OpenScreenshot-${GITHUB_REF_NAME}.zip" \
+            "OpenScreenshot-${GITHUB_REF_NAME}.dmg" \
+            checksums.txt \
+            --title "OpenScreenshot $GITHUB_REF_NAME" \
+            --generate-notes

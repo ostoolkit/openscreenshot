@@ -1,0 +1,54 @@
+name: OpenScreenshot
+options:
+  bundleIdPrefix: com.ostoolkit
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: 2.0.0
+targets:
+  OpenScreenshot:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+        excludes:
+          - "Info.plist"
+    dependencies:
+      - package: KeyboardShortcuts
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: OpenScreenshot
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.utilities
+        NSMicrophoneUsageDescription: OpenScreenshot uses the microphone to record your voice in screen recordings.
+        NSCameraUsageDescription: OpenScreenshot uses the camera to overlay your webcam on screen recordings.
+        NSHumanReadableCopyright: Open source, MIT licensed.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ostoolkit.openscreenshot
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        # Local dev: use your own Apple Development cert so TCC permission
+        # grants survive rebuilds. Contributors: change DEVELOPMENT_TEAM to
+        # your team ID, or set CODE_SIGN_IDENTITY to "-" (ad-hoc; permissions
+        # reset on every rebuild).
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: <INSERT OWN ID FOR DEVELOPMENT>
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_VERSION: "5.0"
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0.0"
+      configs:
+        Release:
+          # Release/notarization: hardened runtime + entitlements. CI overrides
+          # the signing identity to "Developer ID Application".
+          ENABLE_HARDENED_RUNTIME: YES
+          CODE_SIGN_ENTITLEMENTS: Sources/OpenScreenshot.entitlements
