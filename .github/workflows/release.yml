@@ -98,3 +98,18 @@ jobs:
             checksums.txt \
             --title "OpenScreenshot $GITHUB_REF_NAME" \
             --generate-notes
+
+      # Point flake.nix at the artifact that was just published, so Nix users
+      # get the new version on their next `nix flake update`.
+      - name: Update Nix flake to this release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          HASH="sha256-$(openssl dgst -sha256 -binary "OpenScreenshot-${GITHUB_REF_NAME}.zip" | base64)"
+          git fetch origin main
+          git checkout main
+          /usr/bin/sed -i '' -E "s|version = \"[^\"]+\";|version = \"${VERSION}\";|" flake.nix
+          /usr/bin/sed -i '' -E "s|hash = \"sha256-[^\"]+\";|hash = \"${HASH}\";|" flake.nix
+          git config user.name "ostoolkit"
+          git config user.email "292763554+ostoolkit@users.noreply.github.com"
+          git commit -am "Update Nix package to ${VERSION}"
+          git push origin main

@@ -1,0 +1,8 @@
+# Copy to project-local.yml (gitignored) and fill in your own values,
+# then re-run `xcodegen generate`. Signing with a stable personal identity
+# keeps macOS permission grants (Screen Recording etc.) across rebuilds.
+targets:
+  OpenScreenshot:
+    settings:
+      base:
+        DEVELOPMENT_TEAM: YOUR_TEAM_ID

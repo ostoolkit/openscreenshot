@@ -39,6 +39,31 @@ Built entirely in Swift + SwiftUI on top of ScreenCaptureKit.
 
 A cloud upload service is intentionally out of scope for now.
 
+## Installing
+
+Download the latest release from GitHub, or:
+
+**Nix (nix-darwin / home-manager)** — the repo ships a flake that packages each
+release (auto-updated by CI):
+
+```nix
+# flake inputs
+inputs.openscreenshot.url = "github:ostoolkit/openscreenshot";
+
+# nix-darwin module
+{ pkgs, inputs, ... }: {
+  environment.systemPackages = [
+    inputs.openscreenshot.packages.${pkgs.stdenv.hostPlatform.system}.default
+  ];
+}
+```
+
+nix-darwin links the app into `/Applications/Nix Apps`. Or imperatively:
+`nix profile install github:ostoolkit/openscreenshot`. Nix downloads skip the
+quarantine flag, so unsigned releases open without Gatekeeper friction; note
+that the Screen Recording permission re-prompts after updates while releases
+are ad-hoc signed.
+
 ## Building
 
 Requirements: Xcode 15+ (developed against Xcode 26), macOS 14+,

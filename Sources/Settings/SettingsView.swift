@@ -278,7 +278,7 @@ private struct AboutSettingsTab: View {
             Text("An open-source screenshot, recording and annotation tool for macOS.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Text("Version 1.0.0")
+            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }

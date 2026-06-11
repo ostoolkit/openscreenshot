@@ -5,6 +5,9 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 
+# Local-only XcodeGen overrides (personal signing team etc.)
+project-local.yml
+
 # SwiftPM
 .build/
 .swiftpm/

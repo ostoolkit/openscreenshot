@@ -1,4 +1,9 @@
 name: OpenScreenshot
+# Optional, gitignored local overrides (e.g. your DEVELOPMENT_TEAM) —
+# see project-local.yml.example / README "Building".
+include:
+  - path: project-local.yml
+    optional: true
 options:
   bundleIdPrefix: com.ostoolkit
   deploymentTarget:
@@ -33,13 +38,12 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ostoolkit.openscreenshot
         MACOSX_DEPLOYMENT_TARGET: "14.0"
-        # Local dev: use your own Apple Development cert so TCC permission
-        # grants survive rebuilds. Contributors: change DEVELOPMENT_TEAM to
-        # your team ID, or set CODE_SIGN_IDENTITY to "-" (ad-hoc; permissions
-        # reset on every rebuild).
+        # Local dev: put your DEVELOPMENT_TEAM in a gitignored
+        # project-local.yml so TCC permission grants survive rebuilds
+        # (see project-local.yml.example). Without one, build ad-hoc:
+        #   xcodebuild ... CODE_SIGN_IDENTITY="-"
         CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: <INSERT OWN ID FOR DEVELOPMENT>
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO
         GENERATE_INFOPLIST_FILE: NO
