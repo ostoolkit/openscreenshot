@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>ScreenshotX</string>
+	<string>OpenScreenshot</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -25,10 +25,10 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>ScreenshotX uses the camera to overlay your webcam on screen recordings.</string>
+	<string>OpenScreenshot uses the camera to overlay your webcam on screen recordings.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Open source, MIT licensed.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>ScreenshotX uses the microphone to record your voice in screen recordings.</string>
+	<string>OpenScreenshot uses the microphone to record your voice in screen recordings.</string>
 </dict>
 </plist>
